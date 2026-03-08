@@ -1,105 +1,79 @@
 using UnityEngine;
 using UnityEditor;
-using UnityEngine.Rendering;
-using System.Reflection;
+using UnityEditor.SceneManagement;
 
 /// <summary>
 /// Menu: Hospital > Setup Daylight Atmosphere
-/// Creates sun, sky volume, interior lights for a bright abandoned hospital.
 /// </summary>
 public static class HospitalAtmosphereEditor
 {
     [MenuItem("Hospital/Setup Daylight Atmosphere")]
     static void SetupAtmosphere()
     {
-        // ── 1. SUN (Directional Light) ──────────────────────────────
-        GameObject sunGo = GameObject.Find("Sun") ?? new GameObject("Sun");
-        Light sun = sunGo.GetComponent<Light>() ?? sunGo.AddComponent<Light>();
+        // ── SUN ──────────────────────────────────────────────────────
+        GameObject sunGo = GameObject.Find("Sun");
+        if (sunGo == null) sunGo = new GameObject("Sun");
+        Light sun = sunGo.GetComponent<Light>();
+        if (sun == null) sun = sunGo.AddComponent<Light>();
         sun.type      = LightType.Directional;
         sun.color     = new Color(1f, 0.95f, 0.85f);
         sun.intensity = 3.5f;
         sun.shadows   = LightShadows.Soft;
         sunGo.transform.rotation = Quaternion.Euler(52f, -30f, 0f);
-        Undo.RegisterCreatedObjectUndo(sunGo, "Create Sun");
 
-        // ── 2. AMBIENT / SKY VOLUME ─────────────────────────────────
-        GameObject volGo = GameObject.Find("SkySunVolume") ?? new GameObject("SkySunVolume");
-        Volume vol = volGo.GetComponent<Volume>() ?? volGo.AddComponent<Volume>();
-        vol.isGlobal  = true;
-        vol.priority  = 1f;
+        // ── AMBIENT ───────────────────────────────────────────────────
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+        RenderSettings.ambientSkyColor     = new Color(0.6f, 0.7f, 0.9f);
+        RenderSettings.ambientEquatorColor = new Color(0.5f, 0.55f, 0.6f);
+        RenderSettings.ambientGroundColor  = new Color(0.2f, 0.2f, 0.2f);
 
-        if (vol.profile == null)
-        {
-            VolumeProfile profile = ScriptableObject.CreateInstance<VolumeProfile>();
-            if (!AssetDatabase.IsValidFolder("Assets/Settings"))
-                AssetDatabase.CreateFolder("Assets", "Settings");
-            AssetDatabase.CreateAsset(profile, "Assets/Settings/HospitalAtmosphere.asset");
-            vol.sharedProfile = profile;
-        }
+        // ── FOG (light haze) ─────────────────────────────────────────
+        RenderSettings.fog           = true;
+        RenderSettings.fogColor      = new Color(0.75f, 0.80f, 0.85f);
+        RenderSettings.fogMode       = FogMode.Linear;
+        RenderSettings.fogStartDistance = 20f;
+        RenderSettings.fogEndDistance   = 80f;
 
-        Undo.RegisterCreatedObjectUndo(volGo, "Create Sky Volume");
-
-        // ── 3. CORRIDOR / INTERIOR LIGHTS ───────────────────────────
-        // One fluorescent light strip per corridor segment, per floor
-        float floorHeight = 4f;
-        int floors = 5;
-        float buildingDepth = 40f;
-        int lightsPerFloor = 6;
-
-        GameObject lightParent = GameObject.Find("InteriorLights") ?? new GameObject("InteriorLights");
-        // Clear old lights
+        // ── CORRIDOR LIGHTS ───────────────────────────────────────────
+        GameObject lightParent = GameObject.Find("InteriorLights");
+        if (lightParent == null) lightParent = new GameObject("InteriorLights");
+        // Clear old
         while (lightParent.transform.childCount > 0)
             Object.DestroyImmediate(lightParent.transform.GetChild(0).gameObject);
 
+        float floorHeight  = 4f;
+        float buildingDepth= 40f;
+        int   floors       = 5;
+        int   lightsPerFloor = 6;
+
         for (int f = 0; f < floors; f++)
         {
-            float y = f * floorHeight + floorHeight - 0.3f;
+            float y = f * floorHeight + floorHeight - 0.4f;
             for (int i = 0; i < lightsPerFloor; i++)
             {
                 float z = -buildingDepth / 2f + 3f + i * (buildingDepth / lightsPerFloor);
-
-                // Fluorescent strip (emissive quad stand-in + point light)
-                GameObject lightGo = new GameObject($"CorridorLight_F{f}_{i}");
-                lightGo.transform.SetParent(lightParent.transform);
-                lightGo.transform.position = new Vector3(0f, y, z);
-
-                Light l = lightGo.AddComponent<Light>();
-                l.type      = LightType.Point;
-                l.color     = new Color(0.95f, 0.97f, 1f);   // cool white fluorescent
-                l.intensity = 600f;                           // HDRP lumen units
-                l.range     = 8f;
-                l.shadows   = LightShadows.None;              // perf
-
-                // Side room lights
-                GameObject roomLightL = new GameObject($"RoomLight_F{f}_{i}_L");
-                roomLightL.transform.SetParent(lightParent.transform);
-                roomLightL.transform.position = new Vector3(-6f, y, z);
-                Light rl = roomLightL.AddComponent<Light>();
-                rl.type = LightType.Point; rl.color = new Color(0.95f, 0.97f, 1f);
-                rl.intensity = 400f; rl.range = 7f; rl.shadows = LightShadows.None;
-
-                GameObject roomLightR = new GameObject($"RoomLight_F{f}_{i}_R");
-                roomLightR.transform.SetParent(lightParent.transform);
-                roomLightR.transform.position = new Vector3(6f, y, z);
-                Light rr = roomLightR.AddComponent<Light>();
-                rr.type = LightType.Point; rr.color = new Color(0.95f, 0.97f, 1f);
-                rr.intensity = 400f; rr.range = 7f; rr.shadows = LightShadows.None;
+                CreatePointLight($"CorridorLight_F{f}_{i}", lightParent.transform,
+                    new Vector3(0f, y, z), new Color(0.95f, 0.97f, 1f), 800f, 9f);
+                CreatePointLight($"RoomLightL_F{f}_{i}", lightParent.transform,
+                    new Vector3(-6f, y, z), new Color(0.95f, 0.97f, 1f), 500f, 7f);
+                CreatePointLight($"RoomLightR_F{f}_{i}", lightParent.transform,
+                    new Vector3( 6f, y, z), new Color(0.95f, 0.97f, 1f), 500f, 7f);
             }
         }
 
-        // ── 4. WINDOW SUN SHAFTS (spot lights from windows) ─────────
-        GameObject shaftParent = GameObject.Find("SunShafts") ?? new GameObject("SunShafts");
+        // ── WINDOW SUN SHAFTS ─────────────────────────────────────────
+        GameObject shaftParent = GameObject.Find("SunShafts");
+        if (shaftParent == null) shaftParent = new GameObject("SunShafts");
         while (shaftParent.transform.childCount > 0)
             Object.DestroyImmediate(shaftParent.transform.GetChild(0).gameObject);
 
-        float hw = 12f; // half building width
+        float hw = 12f;
         for (int f = 1; f < floors; f++)
         {
             float y = f * floorHeight + floorHeight * 0.55f;
             for (int i = 0; i < 4; i++)
             {
                 float z = -15f + i * 10f;
-                // Left wall shaft
                 GameObject sh = new GameObject($"Shaft_F{f}_{i}");
                 sh.transform.SetParent(shaftParent.transform);
                 sh.transform.position = new Vector3(-hw, y, z);
@@ -107,16 +81,28 @@ public static class HospitalAtmosphereEditor
                 Light sl = sh.AddComponent<Light>();
                 sl.type      = LightType.Spot;
                 sl.color     = new Color(1f, 0.95f, 0.8f);
-                sl.intensity = 3000f;
+                sl.intensity = 2f;
                 sl.range     = 15f;
                 sl.spotAngle = 25f;
                 sl.shadows   = LightShadows.Soft;
             }
         }
 
-        EditorUtility.SetDirty(lightParent);
-        UnityEditor.SceneManagement.EditorSceneManager.MarkAllScenesDirty();
-        Debug.Log("[HospitalAtmosphere] Daylight atmosphere setup complete.");
-        EditorUtility.DisplayDialog("Tamam!", "Gun isigi atmosferi hazir!\nSahneyi kaydet (Ctrl+S).", "OK");
+        EditorSceneManager.MarkAllScenesDirty();
+        Debug.Log("[HospitalAtmosphere] Done.");
+        EditorUtility.DisplayDialog("Tamam!", "Atmosfer hazir! Ctrl+S ile kaydet.", "OK");
+    }
+
+    static void CreatePointLight(string name, Transform parent, Vector3 pos, Color color, float intensity, float range)
+    {
+        GameObject go = new GameObject(name);
+        go.transform.SetParent(parent);
+        go.transform.position = pos;
+        Light l = go.AddComponent<Light>();
+        l.type      = LightType.Point;
+        l.color     = color;
+        l.intensity = intensity;
+        l.range     = range;
+        l.shadows   = LightShadows.None;
     }
 }
